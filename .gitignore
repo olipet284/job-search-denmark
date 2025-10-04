@@ -1,0 +1,6 @@
+*.csv
+*.port
+*.pid
+__pycache__/
+_backups/
+.venv/

@@ -1,0 +1,147 @@
+/* Minimalistic custom theme for Job Review UI */
+:root {
+  --bg: #0f1115;
+  --bg-alt: #161a21;
+  --bg-alt2: #1e2430;
+  --panel: #1c222b;
+  --panel-border: #2a313d;
+  --accent: #3d7dff;
+  --accent-hover: #5a94ff;
+  --danger: #ff5f56;
+  --warn: #ffbd2e;
+  --ok: #27c93f;
+  --text: #dde2ec;
+  --text-dim: #8b93a1;
+  --radius: 8px;
+  --focus-ring: 0 0 0 2px rgba(61,125,255,.5);
+  --transition: 150ms cubic-bezier(.4,.2,.3,1);
+  --font-stack: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
+  font-size: 16px;
+}
+
+/* Light theme (auto via OS preference) */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f9;
+    --bg-alt: #ffffff;
+    --bg-alt2: #eef1f5;
+    --panel: #ffffff;
+    --panel-border: #d7dbe1;
+    --accent: #2d6bff;
+    --accent-hover: #4e82ff;
+    --danger: #d93933;
+    --warn: #d99614;
+    --ok: #1a9f34;
+    --text: #2d3440;
+    --text-dim: #6b737d;
+    --focus-ring: 0 0 0 2px rgba(45,107,255,.35);
+  }
+  body, html { background: var(--bg); color: var(--text); }
+  #listModal th { background: var(--bg-alt2); color: var(--text-dim); }
+  #listModal th.sorting { background: var(--bg-alt); color: var(--text); }
+  #listModal tbody tr:hover { background: #e8eef7; }
+  .badge { background: var(--bg-alt2); color: var(--text-dim); }
+}
+
+/* Manual override classes if needed */
+body.light { --bg: #f6f7f9; --bg-alt:#ffffff; --bg-alt2:#eef1f5; --panel:#ffffff; --panel-border:#d7dbe1; --text:#2d3440; --text-dim:#6b737d; }
+body.dark { --bg:#0f1115; --bg-alt:#161a21; --bg-alt2:#1e2430; --panel:#1c222b; --panel-border:#2a313d; --text:#dde2ec; --text-dim:#8b93a1; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-stack);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body { max-width: 1480px; margin: 0 auto; padding: 1.2rem 1.4rem 3rem; }
+
+h1,h2,h3,h4 { font-weight: 560; letter-spacing:.5px; }
+
+#topbar { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; margin-bottom:.75rem; }
+#topbar select, #topbar button { margin:0; }
+
+/* Base form element styling (cover generic input as dynamic elements lack explicit type) */
+select, input, textarea {
+  background: var(--bg-alt2);
+  border:1px solid var(--panel-border);
+  color: var(--text);
+  padding:.55rem .65rem;
+  border-radius: var(--radius);
+  font-size:.9rem;
+  line-height:1.2;
+  transition: var(--transition);
+}
+select:focus, input:focus, textarea:focus { outline:none; box-shadow: var(--focus-ring); border-color: var(--accent); }
+
+textarea { resize: vertical; }
+
+button { cursor:pointer; border:1px solid var(--panel-border); background: var(--bg-alt2); color: var(--text); padding:.6rem .9rem; font-size:.8rem; border-radius: var(--radius); line-height:1; display:inline-flex; align-items:center; gap:.45rem; font-weight:500; transition: var(--transition); }
+button:hover { background: var(--bg-alt); }
+button:active { background: var(--panel-border); }
+button.primary { background: linear-gradient(135deg,var(--accent),var(--accent-hover)); border: none; color:#fff; }
+button.primary:hover { filter:brightness(1.07); }
+button.secondary { background: var(--bg-alt); }
+button.secondary:hover { background: var(--bg-alt2); }
+button.danger { background: var(--danger); border:none; color:#fff; }
+button.danger:hover { filter:brightness(1.05); }
+
+fieldset { border:1px solid var(--panel-border); padding: .85rem 1rem 1rem; border-radius: var(--radius); background: var(--panel); }
+legend { padding:0 .5rem; font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; color: var(--text-dim); }
+
+label.meta { font-size:.6rem; text-transform:uppercase; letter-spacing:.08em; display:block; margin:0 0 .6rem; color: var(--text-dim); font-weight:600; }
+/* Meta field inputs: match regular input styling (same size as decision reason field) */
+label.meta input, label.meta textarea { font-size:.9rem; margin-top:.3rem; width:100%; background: var(--bg-alt2); border:1px solid var(--panel-border); padding:.5rem .6rem; border-radius: var(--radius); }
+
+#layout { display:grid; grid-template-columns: 340px 1fr; gap:1.2rem; }
+@media (max-width: 1150px){ #layout { grid-template-columns: 1fr; } }
+
+textarea#description { width:100%; min-height:55vh; font-family: monospace; font-size:.8rem; }
+#docsSection textarea { min-height:18vh; }
+
+.small { font-size:.72rem; color: var(--text-dim); }
+#statusBar { font-size:.7rem; margin-bottom:.4rem; color: var(--text-dim); }
+
+.icon-btn { border:1px solid var(--panel-border); background: var(--bg-alt2); padding:.25rem .45rem; font-size:.65rem; line-height:1; cursor:pointer; border-radius:4px; }
+.icon-btn:hover { background: var(--bg-alt); }
+.icon-btn[hidden] { display:none; }
+
+.decision-row { display:flex; gap:.5rem; align-items:center; }
+.decision-row select { min-width:130px; }
+.meta-inline { display:flex; gap:.45rem; align-items:center; }
+.meta-inline input { flex:1 1 auto; }
+
+/* List modal */
+#listModal { position:fixed; inset:0; width:100%; height:100%; margin:0; padding:0; border:none; }
+#listModal::backdrop { background:rgba(0,0,0,.55); backdrop-filter: blur(2px); }
+#listModal article { width:100%; height:100%; margin:0; border-radius:0; display:flex; flex-direction:column; background: var(--bg); }
+#listModal header { padding:.6rem 1rem; border-bottom:1px solid var(--panel-border); background: var(--bg-alt2); }
+#listModal .table-container { flex:1 1 auto; overflow:auto; padding:.4rem .75rem 1.25rem; }
+#listModal table { width:100%; border-collapse:separate; border-spacing:0; }
+#listModal th, #listModal td { white-space:nowrap; padding:.4rem .55rem; font-size:.7rem; border-bottom:1px solid var(--panel-border); color: var(--text); }
+#listModal td.wrap, #listModal th.wrap { white-space:normal; }
+#listModal td.maxw { max-width:500px; }
+#listModal tbody tr:hover { background: var(--bg-alt); }
+#listModal tbody tr.selected { background: rgba(61,125,255,.25); }
+#listModal th { position:sticky; top:0; background: var(--bg-alt); z-index:2; font-weight:600; color: var(--text-dim); }
+#listModal th.sorting { background: var(--bg-alt2) !important; color: var(--text); }
+.sort-btn { background:none; border:none; cursor:pointer; font-size:.68rem; padding:0 .3rem; color: var(--text-dim); }
+.sort-btn:hover { color: var(--text); }
+
+/* Scrollbars (WebKit) */
+#listModal .table-container::-webkit-scrollbar { width:10px; height:10px; }
+#listModal .table-container::-webkit-scrollbar-track { background: var(--bg-alt); }
+#listModal .table-container::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius:6px; }
+#listModal .table-container::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* Status indicators */
+.badge { display:inline-block; padding:.15rem .4rem; border-radius:999px; font-size:.55rem; letter-spacing:.05em; background: var(--bg-alt2); color: var(--text-dim); }
+
+/* Transitions */
+#listModal, button, select, input, textarea { transition: background var(--transition), border-color var(--transition), color var(--transition); }
+
+/* Utility */
+.flex { display:flex; }
+.gap-xs { gap:.35rem; }
+.space-between { justify-content:space-between; }
+

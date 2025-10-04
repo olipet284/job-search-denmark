@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Job Review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}?v=2" />
+</head>
+<body>
+<header>
+  <h3 style="margin-bottom:.25rem">Job Review UI</h3>
+  <div id="statusBar">Loading...</div>
+</header>
+<div id="topbar">
+  <select id="filterSelect"></select>
+  <button id="prevBtn" class="secondary">Prev</button>
+  <button id="nextBtn">Next</button>
+  <button id="saveBtn" class="secondary">Save CSV</button>
+  <button id="listBtn" class="secondary" style="margin-left:.5rem;">List</button>
+  <span id="currentId" class="small"></span>
+</div>
+<div id="layout">
+  <div>
+    <fieldset>
+      <legend>Meta</legend>
+      <div id="meta"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Decision</legend>
+      <div class="decision-row">
+        <select id="decisionSelect">
+          <option value="">(none)</option>
+          <option value="later">later</option>
+          <option value="apply">apply</option>
+          <option value="reject">reject</option>
+        </select>
+        <input type="text" id="decisionReason" placeholder="Reason (optional)" />
+      </div>
+    </fieldset>
+    <!-- Stats panel removed -->
+  </div>
+  <div>
+    <label class="meta"><a id="jobLink" href="#" target="_blank" style="display:none; font-weight:400;">Open job post</a></label>
+    <textarea id="description" placeholder="Paste or edit the job description here..."></textarea>
+    <!-- Application docs (only for to_apply / applied) -->
+    <fieldset id="docsSection" style="display:none; margin-top:1rem;">
+      <legend>Application Docs</legend>
+      <label class="meta">cover_letter
+        <textarea id="cover_letter" data-field="cover_letter" placeholder="Write or paste the tailored cover letter here..." style="min-height:18vh; font-family:monospace;"></textarea>
+      </label>
+      <label class="meta">cv
+        <textarea id="cv" data-field="cv" placeholder="Paste or draft CV adjustments / notes here..." style="min-height:18vh; font-family:monospace;"></textarea>
+      </label>
+      <p class="small">These fields are only visible (and auto-saved) in the <code>to_apply</code> and <code>applied</code> filters.</p>
+    </fieldset>
+  </div>
+  <!-- Current Row JSON panel removed -->
+</div>
+<!-- Modal for table list -->
+<dialog id="listModal">
+  <article>
+    <header style="display:flex; justify-content:space-between; align-items:center;">
+      <strong id="listTitle">Listing</strong>
+      <button id="closeListBtn" class="secondary">Close</button>
+    </header>
+    <div class="table-container">
+      <table id="listTable">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </article>
+</dialog>
+<script>
+let currentId = null;
+let currentFilter = 'pending';
+let saveTimer = null;
+let unsaved = false;            // whether CSV persistence not done after edits
+let lastStatsText = '';         // base stats line without unsaved marker
+// List sorting state
+let listSortCol = null;
+let listSortDir = 'asc';
+function $(id){ return document.getElementById(id); }
+async function loadFilters(){
+  const r = await fetch('/api/filters');
+  const data = await r.json();
+  const sel = $('filterSelect');
+  sel.innerHTML = data.filters.map(f => `<option value="${f}">${f}</option>`).join('');
+  sel.value = currentFilter;
+}
+async function loadStats(){
+  const r = await fetch('/api/stats');
+  const st = await r.json();
+  lastStatsText = `Rows ${st.total} | apply ${st.apply} reject ${st.reject} later ${st.later} pending ${st.pending}`;
+  refreshStatusBar();
+}
+async function fetchJob(id){
+  if(id == null){ return; }
+  const r = await fetch(`/api/job/${id}`);
+  if(!r.ok){ return; }
+  const data = await r.json();
+  renderJob(data);
+}
+function renderJob(data){
+  currentId = data.__row_id;
+  $('currentId').textContent = `Row ID: ${currentId}`;
+  const metaFields = data._editable_fields.filter(f => f !== 'description');
+  const metaDiv = $('meta'); metaDiv.innerHTML='';
+  metaFields.forEach(f => {
+    const val = data[f] == null ? '' : data[f];
+    const wrap = document.createElement('div');
+    if(f === 'applied_date'){
+      wrap.innerHTML = `<label class="meta">${f}<div class="meta-inline"><input data-field="${f}" placeholder="YYYY-MM-DD" value="${escapeHtml(val)}" /><button type="button" class="icon-btn" id="applyDateBtn" title="Set to today">📅</button></div></label>`;
+    } else {
+      wrap.innerHTML = `<label class="meta">${f}<input data-field="${f}" value="${escapeHtml(val)}" /></label>`;
+    }
+    metaDiv.appendChild(wrap);
+  });
+  $('description').value = data.description || '';
+  // Populate application docs if present
+  const clEl = document.getElementById('cover_letter');
+  if(clEl) clEl.value = data.cover_letter || '';
+  const cvEl = document.getElementById('cv');
+  if(cvEl) cvEl.value = data.cv || '';
+  const link = $('jobLink');
+  if(data.url){ link.href = data.url; link.style.display='inline'; } else { link.style.display='none'; }
+  $('decisionSelect').value = data.decision || '';
+  $('decisionReason').value = data.decision_reason || '';
+  // opening a new row after unsaved modifications does not reset unsaved; keep flag
+  refreshStatusBar();
+}
+function escapeHtml(value){
+  if(value === null || value === undefined) return '';
+  return String(value).replace(/[&<>"']/g, function(c){
+    switch(c){
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#39;';
+    }
+    return c;
+  });
+}
+async function navigate(dir){
+  const r = await fetch(`/api/nav?current=${currentId||''}&dir=${dir}&filter=${currentFilter}`);
+  const data = await r.json();
+  if(data.id == null){ alert('No more rows in this filter/direction.'); return; }
+  fetchJob(data.id);
+}
+async function saveUpdates(extra={}){
+  if(currentId == null) return;
+  const updates = {};
+  document.querySelectorAll('[data-field]').forEach(inp => { updates[inp.dataset.field] = inp.value.trim(); });
+  updates['description'] = $('description').value.trim();
+  const decision = $('decisionSelect').value.trim();
+  const reason = $('decisionReason').value.trim();
+  updates['decision'] = decision || null;
+  updates['decision_reason'] = reason || null;
+  const payload = { updates, ...extra };
+  await fetch(`/api/job/${currentId}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  if(extra.save){ await fetch('/api/save', { method:'POST' }); }
+  // mark unsaved unless we persisted
+  unsaved = !extra.save;
+  loadStats(); // refresh stats & status text
+}
+function scheduleAutoSave(){ if(saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(()=> saveUpdates(), 800); }
+$('nextBtn').addEventListener('click', ()=> navigate('next'));
+$('prevBtn').addEventListener('click', ()=> navigate('prev'));
+$('saveBtn').addEventListener('click', ()=> saveUpdates({save:true}));
+// Enhanced filter switching: only switch if the new filter has at least one row
+const filterSel = $('filterSelect');
+filterSel.addEventListener('change', e => {
+  const newFilter = e.target.value;
+  const prevFilter = currentFilter;
+  // Probe first row in new filter
+  fetch(`/api/nav?dir=next&filter=${encodeURIComponent(newFilter)}`)
+    .then(r => r.json())
+    .then(data => {
+      if(data.id == null){
+        // Revert selection
+        e.target.value = prevFilter;
+        currentFilter = prevFilter;
+        const sb = $('statusBar');
+        if(sb) sb.textContent = `No rows for filter '${newFilter}'. Staying on '${prevFilter}'.`;
+        updateAppliedDateButtonVisibility();
+      } else {
+        currentFilter = newFilter;
+        fetchJob(data.id);
+        updateAppliedDateButtonVisibility();
+      }
+    })
+    .catch(err => {
+      console.error('Filter switch error', err);
+      e.target.value = prevFilter;
+      currentFilter = prevFilter;
+      const sb = $('statusBar');
+      if(sb) sb.textContent = `Error loading filter '${newFilter}'. Reverted to '${prevFilter}'.`;
+      updateAppliedDateButtonVisibility();
+    });
+});
+$('description').addEventListener('input', scheduleAutoSave);
+document.addEventListener('input', e => { if(e.target.matches('[data-field]')) scheduleAutoSave(); });
+$('decisionSelect').addEventListener('change', ()=> saveUpdates());
+$('decisionReason').addEventListener('change', ()=> saveUpdates());
+(async function init(){
+  try {
+    await loadFilters();
+    await loadStats();
+    const r = await fetch(`/api/nav?dir=next&filter=${currentFilter}`);
+    const data = await r.json();
+    if(data.id != null){
+      fetchJob(data.id);
+    } else {
+      currentFilter = 'all';
+      await loadFilters();
+      const r2 = await fetch(`/api/nav?dir=next&filter=${currentFilter}`);
+      const d2 = await r2.json();
+      if(d2.id != null){
+        fetchJob(d2.id);
+      } else {
+        $('statusBar').textContent='No rows available in any filter.';
+      }
+    }
+  } catch(err){
+    console.error(err);
+    $('statusBar').textContent = 'Init error: ' + (err.message||err);
+  }
+})();
+window.addEventListener('error', e => {
+  const sb = $('statusBar');
+  if(sb) sb.textContent = 'JS Error: ' + (e.message || 'Unknown');
+});
+
+// Prompt on close if unsaved
+window.addEventListener('beforeunload', (e)=>{
+  if(unsaved){
+    e.preventDefault();
+    e.returnValue = 'You have unsaved changes (not written to CSV). Leave anyway?';
+    return '';
+  }
+  // Always request backend shutdown now (best-effort) since there are no unsaved edits
+  try {
+    const blob = new Blob(["{}"], {type:'application/json'});
+    const ok = navigator.sendBeacon && navigator.sendBeacon('/api/shutdown', blob);
+    if(!ok){
+      setTimeout(()=>{ fetch('/api/shutdown', {method:'POST'}).catch(()=>{}); }, 0);
+    }
+  } catch(_){ }
+});
+
+function refreshStatusBar(){
+  const sb = $('statusBar'); if(!sb) return;
+  if(!lastStatsText){ return; }
+  sb.textContent = lastStatsText + (unsaved ? '  (unsaved edits)' : '');
+}
+// LIST VIEW IMPLEMENTATION
+async function openListView(){
+  const mode = currentFilter;
+  const params = new URLSearchParams({ filter: mode });
+  if(listSortCol){ params.set('sort_col', listSortCol); params.set('sort_dir', listSortDir); }
+  const r = await fetch(`/api/list?${params.toString()}`);
+  if(!r.ok){ alert('Failed to load list'); return; }
+  const data = await r.json();
+  if(data.count === 0){
+    const sb = $('statusBar'); if(sb) sb.textContent = `No rows for filter '${mode}'.`;
+    return;
+  }
+  let cols = Array.isArray(data.columns) && data.columns.length ? data.columns : [];
+  if(cols.length === 0){
+    const collect = new Set();
+    data.rows.forEach(r => Object.keys(r).forEach(k => collect.add(k)));
+    cols = Array.from(collect);
+  }
+  const thead = $('listTable').querySelector('thead');
+  const tbody = $('listTable').querySelector('tbody');
+  const longCols = new Set(['description','cover_letter','cv','decision_reason','url']);
+  const headerHtml = cols.map(c => {
+    const isLong = longCols.has(c);
+    let icon = '↕';
+    if(listSortCol === c){ icon = listSortDir === 'asc' ? '▲' : '▼'; }
+    return `<th class="${isLong?'wrap':''} ${listSortCol===c?'sorting':''}"><div style="display:flex;align-items:center;gap:.25rem;justify-content:space-between;"><span>${c}</span><button class="sort-btn" data-col="${c}" title="Sort by ${c}">${icon}</button></div></th>`;
+  }).join('');
+  thead.innerHTML = '<tr>' + headerHtml + '</tr>';
+  tbody.innerHTML = '';
+  data.rows.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.style.cursor='pointer';
+    if(row.__row_id === currentId){ tr.classList.add('selected'); }
+    tr.addEventListener('click', ()=> { fetchJob(row.__row_id); closeListView(); });
+    const PREVIEW_LEN = 60;
+    tr.innerHTML = cols.map(c => {
+      const isLong = longCols.has(c);
+      const fullVal = row[c] == null ? '' : String(row[c]);
+      let displayVal = fullVal;
+      if(isLong && fullVal.length > PREVIEW_LEN){
+        displayVal = fullVal.slice(0, PREVIEW_LEN) + '…';
+      }
+      return `<td class="${isLong ? 'wrap maxw' : ''}" title="${escapeHtml(fullVal)}">${escapeHtml(displayVal)}</td>`;
+    }).join('');
+    tbody.appendChild(tr);
+  });
+  $('listTitle').textContent = `Filter: ${mode} (${data.count})`;
+  const dlg = $('listModal');
+  if(typeof dlg.showModal === 'function' && !dlg.open){ dlg.showModal(); } else { dlg.open = true; }
+  // Attach sort handlers after rendering
+  thead.querySelectorAll('button.sort-btn').forEach(btn => {
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const col = btn.dataset.col;
+      if(listSortCol !== col){
+        listSortCol = col; listSortDir = 'asc';
+      } else {
+        listSortDir = (listSortDir === 'asc') ? 'desc' : 'asc';
+      }
+      openListView();
+    });
+  });
+}
+function closeListView(){
+  const dlg = $('listModal');
+  if(dlg.close) try { dlg.close(); } catch(_) { dlg.open=false; } else dlg.open=false;
+}
+$('listBtn').addEventListener('click', openListView);
+$('closeListBtn').addEventListener('click', closeListView);
+document.addEventListener('keydown', e => { if(e.key==='Escape'){ closeListView(); }});
+
+// Calendar button logic (only show in to_apply filter)
+document.addEventListener('click', e => {
+  if(e.target && e.target.id === 'applyDateBtn'){
+    const inp = document.querySelector('[data-field="applied_date"]');
+    if(inp){
+      const today = new Date().toISOString().slice(0,10);
+      inp.value = today;
+      scheduleAutoSave();
+    }
+  }
+});
+
+function updateAppliedDateButtonVisibility(){
+  const btn = document.getElementById('applyDateBtn');
+  if(!btn) return;
+  btn.hidden = currentFilter !== 'to_apply';
+}
+
+function updateDocsVisibility(){
+  const sec = document.getElementById('docsSection');
+  if(!sec) return;
+  if(currentFilter === 'to_apply' || currentFilter === 'applied'){
+    sec.style.display = 'block';
+  } else {
+    sec.style.display = 'none';
+  }
+}
+
+// Hook into navigation/render to adjust visibility
+const _origRenderJob = renderJob;
+renderJob = function(data){
+  _origRenderJob(data);
+  updateAppliedDateButtonVisibility();
+  updateDocsVisibility();
+};
+
+// Also adjust after filter change
+// (Handled within enhanced filter switch logic above)
+</script>
+</body>
+</html>
