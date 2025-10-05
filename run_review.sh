@@ -18,7 +18,7 @@ PORT="8010"           # default if user explicitly supplies no numeric but we wo
 USER_PORT_SET=0        # flag if user provided a numeric port
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
-VENV_DIR="${PROJECT_ROOT}/../.venv"
+VENV_DIR="${PROJECT_ROOT}/.venv"
 PY="python3"
 REQ_FILE="${PROJECT_ROOT}/requirements.txt"
 

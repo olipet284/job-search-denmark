@@ -5,7 +5,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
-VENV_DIR="${PROJECT_ROOT}/../.venv"
+VENV_DIR="${PROJECT_ROOT}/.venv"
 REQ_FILE="${PROJECT_ROOT}/requirements.txt"
 FORCE=0
 if [ "${1:-}" = "--force" ]; then FORCE=1; fi
