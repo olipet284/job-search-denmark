@@ -15,7 +15,9 @@
   <select id="filterSelect"></select>
   <button id="prevBtn" class="secondary">Prev</button>
   <button id="nextBtn">Next</button>
+  <button id="rejectNextBtn" class="danger" style="margin-left:.25rem; display:none;" title="Reject current row and move to next (only in pending filter)">Reject &raquo;</button>
   <button id="saveBtn" class="secondary">Save CSV</button>
+  <button id="deleteBtn" class="danger" style="margin-left:.25rem;">Delete</button>
   <button id="listBtn" class="secondary" style="margin-left:.5rem;">List</button>
   <span id="currentId" class="small"></span>
 </div>
@@ -30,7 +32,7 @@
       <div class="decision-row">
         <select id="decisionSelect">
           <option value="">(none)</option>
-          <option value="later">later</option>
+          <option value="delete">delete</option>
           <option value="apply">apply</option>
           <option value="reject">reject</option>
         </select>
@@ -91,7 +93,7 @@ async function loadFilters(){
 async function loadStats(){
   const r = await fetch('/api/stats');
   const st = await r.json();
-  lastStatsText = `Rows ${st.total} | apply ${st.apply} reject ${st.reject} later ${st.later} pending ${st.pending}`;
+  lastStatsText = `Rows ${st.total} | apply ${st.apply} reject ${st.reject} delete ${st.delete} pending ${st.pending}`;
   refreshStatusBar();
 }
 async function fetchJob(id){
@@ -168,6 +170,41 @@ function scheduleAutoSave(){ if(saveTimer) clearTimeout(saveTimer); saveTimer = 
 $('nextBtn').addEventListener('click', ()=> navigate('next'));
 $('prevBtn').addEventListener('click', ()=> navigate('prev'));
 $('saveBtn').addEventListener('click', ()=> saveUpdates({save:true}));
+document.getElementById('rejectNextBtn').addEventListener('click', quickRejectNext);
+$('deleteBtn').addEventListener('click', async ()=>{
+  if(currentId == null){ return; }
+  const confirmMsg = `Delete row ${currentId}? This cannot be undone (unless you restore from a backup CSV).`;
+  if(!confirm(confirmMsg)) return;
+  try {
+    const r = await fetch(`/api/delete/${currentId}?filter=${encodeURIComponent(currentFilter)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ save: true }) });
+    if(!r.ok){ alert('Delete failed'); return; }
+    const data = await r.json();
+    if(data.next_id != null){
+      fetchJob(data.next_id);
+    } else {
+      // No remaining rows in this filter; try reloading stats and maybe switch to 'all'
+      await loadStats();
+      const probe = await fetch(`/api/nav?dir=next&filter=${encodeURIComponent(currentFilter)}`);
+      const probeData = await probe.json();
+      if(probeData.id != null){
+        fetchJob(probeData.id);
+      } else {
+        // attempt fall back to 'all'
+        currentFilter = 'all';
+        await loadFilters();
+        const r2 = await fetch(`/api/nav?dir=next&filter=${currentFilter}`);
+        const d2 = await r2.json();
+        if(d2.id != null){ fetchJob(d2.id); } else {
+          currentId = null; $('currentId').textContent='(no rows)'; $('description').value=''; $('meta').innerHTML='';
+          const sb = $('statusBar'); if(sb) sb.textContent='Row deleted. No rows remain.';
+        }
+      }
+    }
+    await loadStats();
+  } catch(err){
+    console.error('Delete error', err); alert('Delete error: ' + (err.message||err));
+  }
+});
 // Enhanced filter switching: only switch if the new filter has at least one row
 const filterSel = $('filterSelect');
 filterSel.addEventListener('change', e => {
@@ -353,12 +390,53 @@ function updateDocsVisibility(){
   }
 }
 
+function updateQuickRejectVisibility(){
+  const btn = document.getElementById('rejectNextBtn');
+  if(!btn) return;
+  btn.style.display = (currentFilter === 'pending') ? 'inline-block' : 'none';
+}
+
+async function quickRejectNext(){
+  if(currentId == null) return;
+  if(currentFilter !== 'pending') return; // safety guard
+  // Pre-fetch next id BEFORE changing decision (current row will leave pending after reject)
+  let nextId = null;
+  try {
+    const r = await fetch(`/api/nav?current=${currentId}&dir=next&filter=${encodeURIComponent(currentFilter)}`);
+    if(r.ok){
+      const d = await r.json();
+      nextId = d.id;
+    }
+  } catch(_){ }
+  // Set decision UI locally
+  $('decisionSelect').value = 'reject';
+  $('decisionReason').value = '';
+  await saveUpdates();
+  // Move to next pending row if exists
+  if(nextId != null){
+    fetchJob(nextId);
+  } else {
+    // No more pending rows
+    currentId = null;
+    $('currentId').textContent='(no rows)';
+    $('description').value='';
+    $('meta').innerHTML='';
+    updateQuickRejectVisibility();
+    updateAppliedDateButtonVisibility();
+    updateDocsVisibility();
+    refreshStatusBar();
+    const sb = $('statusBar'); if(sb) sb.textContent += ' | All pending rows processed.';
+  }
+  // Stats will refresh inside saveUpdates
+}
+
 // Hook into navigation/render to adjust visibility
 const _origRenderJob = renderJob;
 renderJob = function(data){
   _origRenderJob(data);
   updateAppliedDateButtonVisibility();
   updateDocsVisibility();
+  updateQuickRejectVisibility();
 };
 
 // Also adjust after filter change

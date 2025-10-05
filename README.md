@@ -1,41 +1,32 @@
 # Job Search Denmark
 
-A minimal, single-user Flask + pand./run_review.sh
-```
-
-You'll see output like:
-
-```text
-[auto] Selected free port 51287
-[start] PID 70823 (port 51287)
-Visit: http://127.0.0.1:51287
-```
-
-Then open the displayed URL (auto-open may occur on some systems).cation for efficiently reviewing, annotating, filtering and tracking job postings stored in a CSV. Includes simple web scraping utilities for LinkedIn, Jobnet, and JobIndex (Denmark-specific).
+Single‑user Flask + pandas application for efficiently scraping, reviewing, annotating, filtering and tracking job postings in a CSV. Includes lightweight scrapers for LinkedIn, Jobnet, and Jobindex plus a streamlined review UI optimized for fast triage.
 
 ## Key Features
 
-- CSV‑backed data store with automatic timestamped backups (`_backups/`).
-- Inline editing of core job metadata (company, title, url, location, etc.).
-- Unified decision workflow: `apply`, `reject`, `later`, or pending (empty).
-- Smart filters: `pending`, `missing_desc`, `reject`, `to_apply` (apply but no applied_date), `applied`, `all`.
-- Conditional application workspace fields (only in `to_apply` / `applied`): `cover_letter`, `cv`.
-- Debounced auto-save of edits (in-memory) + explicit “Save CSV” to persist to disk.
-- Safe shutdown trigger when closing the browser tab if no unsaved edits.
-- Fullscreen list / table modal with:
-  - Dynamic columns (all fields) and 60‑character previews for large text: `description`, `cover_letter`, `cv`, `decision_reason`, `url`.
-  - Sorting on any column (toggle ascending / descending via header icon).
-  - Row selection to jump directly to a record.
-- Quick-set 📅 button (in `to_apply` filter) to insert today’s date into `applied_date`.
-- Automatic port selection + start/stop/status helper script.
-- Dark / Light adaptive theme (follows system preference) with minimalistic styling.
+- CSV‑backed data store with two rotating backups (session + previous save).
+- Inline editing of job metadata (company, title, url, location, etc.).
+- Decision workflow: `apply`, `reject`, `delete` (or pending = empty). `delete` rows hidden everywhere except `all`.
+- Fast triage: “Reject »” button in `pending` sets decision to reject and navigates to the next row.
+- Permanent Delete button (with confirmation) to remove a row completely.
+- Smart filters: `pending`, `missing_desc`, `reject`, `to_apply`, `applied`, `all`.
+- Conditional fields (`cover_letter`, `cv`) only in `to_apply` / `applied`.
+- Debounced auto-save (in-memory) + explicit Save CSV with unsaved indicator.
+- Fullscreen sortable list modal (dynamic columns, truncated previews, tooltips).
+- One‑click 📅 set `applied_date` to today (in `to_apply`).
+- Scraper progress bars (tqdm) & early termination heuristics (Jobnet/Jobindex), safe LinkedIn pagination.
+- LinkedIn only fetches details for new IDs; skips existing.
+- `job_board` column for source identification.
+- Normalized `time_posted` to `YYYY-MM-DD` during merge.
+- Daily scrape guard ensures scraping at most once per day.
+- Adaptive dark/light theme.
 
 ## Project Layout
 
 ```text
 review_app.py      # Flask application + API endpoints
-util.py            # Scraper functions (LinkedIn / Jobnet / Jobindex)
-main.ipynb         # Sandbox notebook for running scrapers + merging results
+util.py            # Scraper functions
+main.ipynb         # Sandbox notebook
 templates/
   index.html       # Single-page UI shell
 static/
@@ -43,7 +34,10 @@ static/
 install.sh         # One-time environment setup (venv + requirements)
 run_review.sh      # Launch / stop / status helper
 requirements.txt   # Python dependencies
-_backups/          # Timestamped CSV snapshots (auto-created)
+_backups/          # Two rotating backups (session + previous save)
+daily_update.py    # Once-per-day scrape orchestrator
+update.py          # Aggregates scrapes & merges/dedups with existing CSV
+job_config.py      # Central scrape parameter config
 ```
 
 ## Prerequisites
@@ -105,31 +99,42 @@ Stopping sends a signal to the stored PID; stale PID files are cleaned automatic
 | employment_type | (e.g., Contract / Permanent) |
 | full_or_part_time | Full-time / Part-time indicator |
 | applied_date | Date you applied (YYYY-MM-DD) |
-| decision | apply / reject / later / (empty) |
+| decision | apply / reject / delete / (empty pending) |
+| job_board | Source (linkedin / jobnet / jobindex) |
 | decision_reason | Optional short rationale |
 | cover_letter | Draft or tailored cover letter (only visible in certain filters) |
 | cv | Notes or modified CV content |
 | last_updated | Auto ISO timestamp of last edit |
 | __row_id | Internal stable row identifier (not written back to CSV) |
 
-Additional columns present in `jobs.csv` are preserved and surfaced automatically in the list view.
+Additional columns are preserved automatically. `__row_id` is internal only (not written back).
 
 ## Filters Explained
 
-- `pending`: undecided or `later` items.
-- `missing_desc`: description empty or null.
-- `reject`: explicitly rejected.
-- `to_apply`: decision == apply but `applied_date` empty.
-- `applied`: rows with a non-empty `applied_date`.
-- `all`: everything.
+- `pending`: decision empty (not apply/reject/delete)
+- `missing_desc`: description empty or null
+- `reject`: decision=reject
+- `to_apply`: decision=apply & no `applied_date`
+- `applied`: has `applied_date`
+- `all`: every row (includes `delete`)
 
-Changing a filter automatically attempts to load the first matching row; if no rows, it reverts to the previous filter.
+Rows with `delete` are excluded from all filters except `all`.
 
 ## Editing & Saving Lifecycle
 
-1. Editing fields triggers a debounced in-memory save via `/api/job/<id>` (not persisted to disk immediately).
-2. “Save CSV” (or server shutdown with no unsaved edits) calls `/api/save` to write an atomic CSV and create a timestamped backup.
-3. Unsaved state is reflected in the status bar: `(unsaved edits)`.
+1. Debounced in-memory updates as you type.
+2. "Save CSV" writes atomically and updates the single previous-save backup.
+3. Session startup creates (or refreshes) a session backup.
+4. Unsaved indicator shown until persisted.
+
+### Backup Strategy
+
+| Type | When | Filename Pattern | Kept |
+|------|------|------------------|------|
+| Session | App start | `jobs_session_backup_YYYYMMDD_HHMMSS.csv` | 1 |
+| Previous save | Each manual save | `jobs_prev_backup_YYYYMMDD_HHMMSS.csv` | 1 |
+
+Old backups of the same type are removed; at most two backup files exist.
 
 ## List (Table) Modal
 
@@ -171,9 +176,11 @@ The file `util.py` contains three focused scraping helpers returning pandas Data
 
 | Function | Source | Key Parameters | Notes |
 |----------|--------|----------------|-------|
-| `linkedin_scraper(title, city, num_jobs)` | LinkedIn (guest endpoints) | title, city, num_jobs | Iteratively fetches job IDs then details; populates company, title, location, description (clamped), applicants, seniority. Time parsing omits weeks/months for now. |
-| `jobnet_scraper(title, city, postal, km_dist, num_jobs)` | jobnet.dk | title, city, postal, km_dist, num_jobs | Uses JSON search API; pulls employment type and full/part time; fetches description for internal postings. |
-| `jobindex_scraper(title, city, postal, street, km_dist, num_jobs)` | jobindex.dk | title, city, postal, street, km_dist, num_jobs | Paginates via API; fetches HTML for local listings; deduplicates via DataFrame drop_duplicates. |
+| `linkedin_scraper(title, city, num_jobs, existing_ids)` | LinkedIn | title, city, num_jobs | Skips known IDs, paginates until target or no new IDs |
+| `jobnet_scraper(title, city, postal, km_dist, num_jobs, existing_keys, cutoff_dt)` | Jobnet | title, city, postal, km_dist | Early stop on existing key or older than last scrape |
+| `jobindex_scraper(title, city, postal, street, km_dist, num_jobs, existing_keys, cutoff_dt)` | Jobindex | title, city, postal, street, km_dist | Early stop + HTML detail parsing for local postings |
+
+All inject `job_board`; dates normalized later in `update.py`.
 
 All scrapers are MVPs and thus should be further extended to ensure all relevant information is gathered.
 
@@ -189,8 +196,6 @@ Used as an experimental workspace to:
  
 Then launch the review UI to process the new inflow.
 
-## Roadmap
+## Daily Scrape Guard
 
-1. Pruning backups
-2. Improving scrapers
-3. Improve UI
+`daily_update.py` ensures `update.py` runs at most once per UTC day before launching the review server (`run_review.sh`).

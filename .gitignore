@@ -4,3 +4,5 @@
 __pycache__/
 _backups/
 .venv/
+*.json
+TODO.md

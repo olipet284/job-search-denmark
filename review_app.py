@@ -41,6 +41,12 @@ class JobsStore:
         for col, default in REQUIRED_COLUMNS_DEFAULTS:
             if col not in df.columns:
                 df[col] = default
+        # Migration: convert legacy 'later' decisions to 'delete'
+        if 'decision' in df.columns:
+            try:
+                df['decision'] = df['decision'].replace({'later': 'delete'})
+            except Exception:
+                pass
         # Ensure optional display/edit fields exist
         for opt_col in EDITABLE_TEXT_FIELDS:
             if opt_col not in df.columns:
@@ -57,13 +63,43 @@ class JobsStore:
 
     def save(self) -> None:
         with self.lock:
-            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            backup = BACKUP_DIR / f"jobs_{ts}.csv"
+            # Create a single "previous save" backup (overwrite older previous ones)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Remove any older prev backups so only one remains after this
+            try:
+                for p in BACKUP_DIR.glob('jobs_prev_backup_*.csv'):
+                    try: p.unlink()
+                    except Exception: pass
+            except Exception:
+                pass
+            backup = BACKUP_DIR / f"jobs_prev_backup_{ts}.csv"
             tmp = self.csv_path.with_suffix('.tmp')
             out_df = self.df.drop(columns=[ID_COL]) if ID_COL in self.df.columns else self.df
             out_df.to_csv(tmp, index=False)
             out_df.to_csv(backup, index=False)
             os.replace(tmp, self.csv_path)
+            # Do not retain more than one prev backup; session backup handled separately.
+
+def create_session_backup(data_file: Path):
+    """Create (and replace) a session startup backup of the current jobs.csv.
+
+    Keeps only a single jobs_session_backup_* file. Invoked once per process start.
+    """
+    if not data_file.exists():
+        return
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Remove older session backups
+    try:
+        for p in BACKUP_DIR.glob('jobs_session_backup_*.csv'):
+            try: p.unlink()
+            except Exception: pass
+    except Exception:
+        pass
+    session_backup = BACKUP_DIR / f"jobs_session_backup_{ts}.csv"
+    try:
+        session_backup.write_bytes(data_file.read_bytes())
+    except Exception:
+        pass
 
     def get_row(self, row_id: int) -> Optional[Dict[str, Any]]:
         with self.lock:
@@ -88,12 +124,12 @@ class JobsStore:
                     self.df.at[idx, k] = v
                     dirty = True
             if dirty:
-                self.df.at[idx, 'last_updated'] = datetime.utcnow().isoformat(timespec='seconds')
+                self.df.at[idx, 'last_updated'] = datetime.now().isoformat(timespec='seconds')
             return True
 
     def set_decision(self, row_id: int, decision: Optional[str], reason: Optional[str]) -> bool:
         norm = decision.lower() if decision else None
-        if norm and norm not in {"apply","reject","later"}:
+        if norm and norm not in {"apply","reject","delete"}:
             return False
         with self.lock:
             idx_arr = self.df.index[self.df[ID_COL] == row_id]
@@ -103,24 +139,40 @@ class JobsStore:
             self.df.at[idx,'decision'] = norm
             if reason is not None:
                 self.df.at[idx,'decision_reason'] = (reason or None)
-            self.df.at[idx,'last_updated'] = datetime.utcnow().isoformat(timespec='seconds')
+            self.df.at[idx,'last_updated'] = datetime.now().isoformat(timespec='seconds')
+            return True
+
+    def delete_row(self, row_id: int) -> bool:
+        """Remove a row permanently from the in‑memory dataframe.
+
+        Note: IDs (__row_id) are NOT re-numbered so that any references
+        (e.g. in backups) remain stable. The deleted row simply disappears
+        from future navigation / filters. Persistence occurs only when
+        save() is explicitly called (or via API that opts-in).
+        """
+        with self.lock:
+            idx_arr = self.df.index[self.df[ID_COL] == row_id]
+            if len(idx_arr) == 0:
+                return False
+            self.df = self.df.drop(index=idx_arr[0])
             return True
 
     def _filtered(self, mode: str) -> pd.DataFrame:
         df = self.df
+        # Deleted rows are only visible in 'all'
+        if mode != 'all':
+            df = df[(df['decision'] != 'delete') | (df['decision'].isna())]
         if mode == 'pending':
-            return df[(df['decision'].isna()) | (df['decision'] == '') | (df['decision'] == 'later')]
+            return df[(df['decision'].isna()) | (df['decision'] == '')]
         if mode == 'missing_desc':
             return df[(df[DESCRIPTION_FIELD].isna()) | (df[DESCRIPTION_FIELD] == '')]
         if mode == 'reject':
             return df[df['decision'] == 'reject']
         if mode == 'to_apply':
-            # decision apply but no applied_date recorded
             cond_apply = df['decision'] == 'apply'
             cond_no_date = (df['applied_date'].isna()) | (df['applied_date'] == '') if 'applied_date' in df.columns else True
             return df[cond_apply & cond_no_date]
         if mode == 'applied':
-            # any row with an applied_date value (non-empty)
             if 'applied_date' in df.columns:
                 return df[(~df['applied_date'].isna()) & (df['applied_date'] != '')]
             return df.iloc[0:0]
@@ -145,12 +197,12 @@ class JobsStore:
             total = len(self.df)
             apply_ct = int((self.df['decision'] == 'apply').sum())
             reject_ct = int((self.df['decision'] == 'reject').sum())
-            later_ct = int((self.df['decision'] == 'later').sum())
-            pending_ct = int(((self.df['decision'].isna()) | (self.df['decision'] == '') | (self.df['decision'] == 'later')).sum())
+            delete_ct = int((self.df['decision'] == 'delete').sum())
+            pending_ct = int(((self.df['decision'].isna()) | (self.df['decision'] == '')).sum())
             missing_desc = 0
             if DESCRIPTION_FIELD in self.df.columns:
                 missing_desc = int(self.df[DESCRIPTION_FIELD].isna().sum())
-            return dict(total=total, apply=apply_ct, reject=reject_ct, later=later_ct,
+            return dict(total=total, apply=apply_ct, reject=reject_ct, delete=delete_ct,
                         pending=pending_ct, missing_description=missing_desc)
 
 
@@ -224,6 +276,36 @@ def create_app(store: JobsStore) -> Flask:
     def api_filters():
         return jsonify({'filters':['pending','missing_desc','reject','to_apply','applied','all']})
 
+    @app.post('/api/delete/<int:row_id>')
+    def api_delete(row_id: int):
+        """Delete a row and return an adjacent row id (next preference, else previous).
+
+        Query param 'filter' is used to determine the navigation context.
+        Body may include {"save": true} to persist immediately.
+        Response: {status, next_id}
+        """
+        mode = request.args.get('filter','pending')
+        # Determine candidate navigation targets BEFORE deletion
+        next_id = store.nav(row_id, 1, mode)
+        prev_id = store.nav(row_id, -1, mode)
+        if not store.delete_row(row_id):
+            return jsonify({'error':'not found'}), 404
+        # Prefer next if it is not the deleted row; if next was the deleted row or None, fall back
+        candidate = None
+        if next_id is not None and next_id != row_id:
+            candidate = next_id
+        elif prev_id is not None and prev_id != row_id:
+            candidate = prev_id
+        payload = {'status':'deleted', 'next_id': candidate}
+        try:
+            body = request.get_json(silent=True) or {}
+        except Exception:
+            body = {}
+        if body.get('save'):
+            store.save()
+            payload['persisted'] = True
+        return jsonify(payload)
+
     @app.post('/api/shutdown')
     def api_shutdown():
         """Shutdown the development server. Intended for local single-user use only."""
@@ -289,6 +371,8 @@ def main():
     args = parser.parse_args()
 
     store = JobsStore(DATA_FILE)
+    # Create session backup once at startup
+    create_session_backup(DATA_FILE)
     app = create_app(store)
     print(f"Loaded {len(store.df)} rows from {DATA_FILE}")
     print(f"Visit: http://{args.host}:{args.port}")

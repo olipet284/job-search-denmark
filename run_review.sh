@@ -104,6 +104,14 @@ if [ "$CMD" = "start" ] && [ $USER_PORT_SET -eq 0 ] && [ $# -eq 0 ]; then
   echo "[auto] Selected free port $PORT" >&2
 fi
 
+# Perform daily scrape (runs update.py at most once per day)
+if [ "$CMD" = "start" ]; then
+  echo "[daily] Checking if daily scrape needed..." >&2
+  if ! "$PY" "${SCRIPT_DIR}/daily_update.py"; then
+    echo "[daily] Warning: daily scrape script exited with an error (continuing anyway)." >&2
+  fi
+fi
+
 HOST="127.0.0.1"
 URL="http://${HOST}:${PORT}"
 
