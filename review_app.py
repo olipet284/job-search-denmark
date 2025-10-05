@@ -64,7 +64,7 @@ class JobsStore:
     def save(self) -> None:
         with self.lock:
             # Create a single "previous save" backup (overwrite older previous ones)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             # Remove any older prev backups so only one remains after this
             try:
                 for p in BACKUP_DIR.glob('jobs_prev_backup_*.csv'):
@@ -79,27 +79,6 @@ class JobsStore:
             out_df.to_csv(backup, index=False)
             os.replace(tmp, self.csv_path)
             # Do not retain more than one prev backup; session backup handled separately.
-
-def create_session_backup(data_file: Path):
-    """Create (and replace) a session startup backup of the current jobs.csv.
-
-    Keeps only a single jobs_session_backup_* file. Invoked once per process start.
-    """
-    if not data_file.exists():
-        return
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Remove older session backups
-    try:
-        for p in BACKUP_DIR.glob('jobs_session_backup_*.csv'):
-            try: p.unlink()
-            except Exception: pass
-    except Exception:
-        pass
-    session_backup = BACKUP_DIR / f"jobs_session_backup_{ts}.csv"
-    try:
-        session_backup.write_bytes(data_file.read_bytes())
-    except Exception:
-        pass
 
     def get_row(self, row_id: int) -> Optional[Dict[str, Any]]:
         with self.lock:
@@ -124,7 +103,7 @@ def create_session_backup(data_file: Path):
                     self.df.at[idx, k] = v
                     dirty = True
             if dirty:
-                self.df.at[idx, 'last_updated'] = datetime.now().isoformat(timespec='seconds')
+                self.df.at[idx, 'last_updated'] = datetime.utcnow().isoformat(timespec='seconds')
             return True
 
     def set_decision(self, row_id: int, decision: Optional[str], reason: Optional[str]) -> bool:
@@ -139,16 +118,14 @@ def create_session_backup(data_file: Path):
             self.df.at[idx,'decision'] = norm
             if reason is not None:
                 self.df.at[idx,'decision_reason'] = (reason or None)
-            self.df.at[idx,'last_updated'] = datetime.now().isoformat(timespec='seconds')
+            self.df.at[idx,'last_updated'] = datetime.utcnow().isoformat(timespec='seconds')
             return True
 
     def delete_row(self, row_id: int) -> bool:
         """Remove a row permanently from the in‑memory dataframe.
 
-        Note: IDs (__row_id) are NOT re-numbered so that any references
-        (e.g. in backups) remain stable. The deleted row simply disappears
-        from future navigation / filters. Persistence occurs only when
-        save() is explicitly called (or via API that opts-in).
+        IDs are not renumbered; the row simply disappears from future navigation / filters.
+        Persistence occurs only when save() is explicitly called (or via API that opts in).
         """
         with self.lock:
             idx_arr = self.df.index[self.df[ID_COL] == row_id]
@@ -204,6 +181,27 @@ def create_session_backup(data_file: Path):
                 missing_desc = int(self.df[DESCRIPTION_FIELD].isna().sum())
             return dict(total=total, apply=apply_ct, reject=reject_ct, delete=delete_ct,
                         pending=pending_ct, missing_description=missing_desc)
+
+def create_session_backup(data_file: Path):
+    """Create (and replace) a session startup backup of the current jobs.csv.
+
+    Keeps only a single jobs_session_backup_* file. Invoked once per process start.
+    """
+    if not data_file.exists():
+        return
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Remove older session backups
+    try:
+        for p in BACKUP_DIR.glob('jobs_session_backup_*.csv'):
+            try: p.unlink()
+            except Exception: pass
+    except Exception:
+        pass
+    session_backup = BACKUP_DIR / f"jobs_session_backup_{ts}.csv"
+    try:
+        session_backup.write_bytes(data_file.read_bytes())
+    except Exception:
+        pass
 
 
 def serialize_row(row: Dict[str, Any]) -> Dict[str, Any]:
