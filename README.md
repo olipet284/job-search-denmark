@@ -23,6 +23,16 @@ Single‑user Flask + pandas application for efficiently scraping, reviewing, an
 - Auto-reject based on configurable title keywords.
 - Adaptive dark/light theme.
 
+## Screenshots
+
+Light mode:
+
+![Job Review UI – Light Mode](docs/ui_light.png "Light mode screenshot of the Job Review interface showing meta fields, description pane and action bar.")
+
+Dark mode:
+
+![Job Review UI – Dark Mode](docs/ui_dark.png "Dark mode screenshot of the Job Review interface with the same layout in dark theme.")
+
 ## Project Layout
 
 ```text
