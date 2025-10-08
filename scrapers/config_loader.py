@@ -3,56 +3,54 @@ from pathlib import Path
 from functools import lru_cache
 from typing import List, Tuple
 
-_CONFIG_PATH = Path(__file__).parent / "config.ini"
-
-DEFAULT_SCRAPE = {
-    "title": "Data Scientist",
-    "titles": "",
-    "city": "Aarhus C",
-    "postal": "8000",
-    "street": "Ryesgade 1",
-    "num_jobs": "50",
-    "km_dist": "70",
-}
-
-DEFAULT_AUTO_REJECT = {
-    "keywords": (
-        "intern, internship, senior, sr., frontend, front-end, .net, pædagog, praktikant, "
-        "vikar, android, postdoc, fullstack, full-stack, maternity"
-    )
-}
+# config.ini should be in the project root (parent of scrapers/ folder)
+_CONFIG_PATH = Path(__file__).parent.parent / "config.ini"
 
 @lru_cache(maxsize=1)
 def _load() -> configparser.ConfigParser:
+    if not _CONFIG_PATH.exists():
+        raise FileNotFoundError(f"Config file not found: {_CONFIG_PATH}")
+    
     parser = configparser.ConfigParser()
-    # Preserve case where meaningful (although keys are usually lowercased); we keep defaults first
-    parser.read_dict({"scrape": DEFAULT_SCRAPE, "auto_reject": DEFAULT_AUTO_REJECT})
-    if _CONFIG_PATH.exists():
-        try:
-            parser.read(_CONFIG_PATH, encoding="utf-8")
-        except Exception as e:
-            print(f"[config] Warning: failed reading {_CONFIG_PATH}: {e}")
-    else:
-        print(f"[config] Info: config file {_CONFIG_PATH} not found; using defaults")
+    try:
+        parser.read(_CONFIG_PATH, encoding="utf-8")
+    except Exception as e:
+        raise RuntimeError(f"Failed to read config file {_CONFIG_PATH}: {e}")
+    
+    # Validate required sections exist
+    if 'scrape' not in parser:
+        raise ValueError(f"Missing [scrape] section in {_CONFIG_PATH}")
+    if 'auto_reject' not in parser:
+        raise ValueError(f"Missing [auto_reject] section in {_CONFIG_PATH}")
+    
     return parser
 
 @lru_cache(maxsize=1)
 def get_scrape_params() -> Tuple[str,str,str,str,int,int]:
     cfg = _load()
     s = cfg["scrape"]
+    
+    # Validate required fields exist
+    required_fields = ["city", "postal", "street", "num_jobs", "km_dist"]
+    for field in required_fields:
+        if field not in s:
+            raise ValueError(f"Missing required field '{field}' in [scrape] section")
+    
     try:
-        num_jobs = int(s.get("num_jobs", DEFAULT_SCRAPE["num_jobs"]))
+        num_jobs = int(s["num_jobs"])
     except ValueError:
-        num_jobs = int(DEFAULT_SCRAPE["num_jobs"])
+        raise ValueError(f"Invalid num_jobs value: {s['num_jobs']} (must be integer)")
+    
     try:
-        km_dist = int(s.get("km_dist", DEFAULT_SCRAPE["km_dist"]))
+        km_dist = int(s["km_dist"])
     except ValueError:
-        km_dist = int(DEFAULT_SCRAPE["km_dist"])
+        raise ValueError(f"Invalid km_dist value: {s['km_dist']} (must be integer)")
+    
     return (
-        s.get("title", DEFAULT_SCRAPE["title"]),  # singular (legacy)
-        s.get("city", DEFAULT_SCRAPE["city"]),
-        s.get("postal", DEFAULT_SCRAPE["postal"]),
-        s.get("street", DEFAULT_SCRAPE["street"]),
+        s.get("title", ""),  # singular (legacy, optional)
+        s["city"],
+        s["postal"],
+        s["street"],
         num_jobs,
         km_dist,
     )
@@ -61,6 +59,8 @@ def get_scrape_params() -> Tuple[str,str,str,str,int,int]:
 def get_titles_list() -> List[str]:
     cfg = _load()
     s = cfg["scrape"]
+    
+    # Check for titles field (preferred)
     raw_multi = s.get("titles", "").strip()
     if raw_multi:
         parts = [p.strip() for p in raw_multi.split(',') if p.strip()]
@@ -73,14 +73,24 @@ def get_titles_list() -> List[str]:
                 seen.add(tl)
                 uniq.append(t)
         return uniq
-    # Fallback to single title
-    single = s.get("title", DEFAULT_SCRAPE["title"]).strip()
-    return [single] if single else []
+    
+    # Fallback to single title (legacy)
+    single = s.get("title", "").strip()
+    if single:
+        return [single]
+    
+    # No titles configured
+    raise ValueError("No job titles configured. Set 'titles' or 'title' in [scrape] section")
 
 @lru_cache(maxsize=1)
 def get_title_keywords() -> List[str]:
     cfg = _load()
-    raw = cfg["auto_reject"].get("keywords", DEFAULT_AUTO_REJECT["keywords"]) or ""
+    
+    # Require keywords field to exist
+    if "keywords" not in cfg["auto_reject"]:
+        raise ValueError("Missing required field 'keywords' in [auto_reject] section")
+    
+    raw = cfg["auto_reject"]["keywords"] or ""
     # Split on commas, strip whitespace, keep non-empty
     kws = [k.strip() for k in raw.split(',') if k.strip()]
     # Deduplicate preserving order
