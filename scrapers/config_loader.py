@@ -102,3 +102,23 @@ def get_title_keywords() -> List[str]:
             seen.add(kl)
             uniq.append(k)
     return uniq
+
+@lru_cache(maxsize=1)
+def get_notion_config() -> Tuple[str, str]:
+    cfg = _load()
+    
+    # Require notion section and fields
+    if 'notion' not in cfg:
+        raise ValueError("Missing [notion] section in config")
+    notion_cfg = cfg['notion']
+    
+    if 'notion_token' not in notion_cfg or 'notion_database_id' not in notion_cfg:
+        raise ValueError("Missing 'notion_token' or 'notion_database_id' in [notion] section")
+    
+    notion_token = notion_cfg['notion_token'].strip()
+    notion_database_id = notion_cfg['notion_database_id'].strip()
+    
+    if not notion_token or not notion_database_id:
+        raise ValueError("'notion_token' and 'notion_database_id' must be non-empty in [notion] section")
+    
+    return notion_token, notion_database_id

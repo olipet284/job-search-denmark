@@ -153,3 +153,18 @@ fi
 trap 'echo "[trap] Stopping review app (PID ${APP_PID})"; kill ${APP_PID} 2>/dev/null || true' INT TERM EXIT
 wait ${APP_PID} 2>/dev/null || true
 rm -f "$PID_FILE" 2>/dev/null || true
+
+# Run notion upload after the review app is closed
+NOTION_SCRIPT="${SCRIPT_DIR}/notion.py"
+
+echo "[notion] Attempting Notion upload..." >&2
+if [ ! -f "$NOTION_SCRIPT" ]; then
+  echo "[notion] Skipping: script not found at $NOTION_SCRIPT" >&2
+else
+  if "$PY" "$NOTION_SCRIPT"; then
+    echo "[notion] Success: Notion upload completed." >&2
+  else
+    rc=$?
+    echo "[notion] Error: Notion upload failed (exit code $rc)." >&2
+  fi
+fi

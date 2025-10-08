@@ -69,10 +69,7 @@ def linkedin_scraper(title, city, num_jobs, existing_ids: Optional[Set[str]] = N
                 if len(id_list) >= num_jobs:
                     break
             raw_offset += len(page_jobs)  # advance offset by total seen on this page
-            # Heuristic early stop: if page yielded zero new IDs, and we already have some, assume older region
-            if new_this_page == 0 and len(id_list) > 0:
-                print("[scrape] LinkedIn: no new ids in current page; stopping to avoid unnecessary requests")
-                break
+            # Removed early stopping heuristic to allow deeper pagination even if a page yields no new ids
     print(f"[scrape] LinkedIn: collected {len(id_list)} new ids (target {num_jobs}).")
     job_list = []
     fetch_ids = [i for i in id_list if i not in existing_ids]
@@ -194,7 +191,6 @@ def jobnet_scraper(title, city, postal, km_dist, num_jobs, existing_keys: Option
                 posted_dt = None
         if key in existing_keys:
             early_reason = "first existing key encountered (sorted list)"
-            # If we haven't collected anything new yet, we still can exit safely (no new jobs)
             break
         if cutoff_dt and posted_dt is not None and posted_dt.to_pydatetime() < cutoff_dt:
             early_reason = "job older than last scrape timestamp"
@@ -299,7 +295,6 @@ def jobindex_scraper(title, city, postal, street, km_dist, num_jobs, existing_ke
 
 
 def auto_reject_jobs(df):
-    
     # Reject based on title keywords
     for keyword in title_keywords:
         df.loc[df['title'].str.contains(keyword, case=False, na=False), 'decision'] = 'reject'
