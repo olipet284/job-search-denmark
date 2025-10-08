@@ -10,8 +10,10 @@ import threading
 import pandas as pd
 from flask import Flask, jsonify, request, render_template
 
-DATA_FILE = Path(__file__).parent / "jobs.csv"
-BACKUP_DIR = Path(__file__).parent / "_backups"
+# Root project directory (one level up from this ui/ folder)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DATA_FILE = ROOT_DIR / "jobs.csv"
+BACKUP_DIR = ROOT_DIR / "_backups"
 BACKUP_DIR.mkdir(exist_ok=True)
 
 ID_COL = "__row_id"
@@ -172,15 +174,29 @@ class JobsStore:
     def stats(self) -> Dict[str, Any]:
         with self.lock:
             total = len(self.df)
-            apply_ct = int((self.df['decision'] == 'apply').sum())
+            # Applied vs to_apply split: applied rows have decision=apply AND a non-empty applied_date
+            applied_ct = 0
+            to_apply_ct = 0
+            if 'applied_date' in self.df.columns:
+                mask_apply = self.df['decision'] == 'apply'
+                # Treat NaN or empty string as not applied yet
+                has_date = (~self.df['applied_date'].isna()) & (self.df['applied_date'] != '')
+                applied_ct = int((mask_apply & has_date).sum())
+                to_apply_ct = int((mask_apply & ~has_date).sum())
+            else:
+                # Fallback: all apply decisions considered to_apply when no column present
+                to_apply_ct = int((self.df['decision'] == 'apply').sum())
             reject_ct = int((self.df['decision'] == 'reject').sum())
             delete_ct = int((self.df['decision'] == 'delete').sum())
             pending_ct = int(((self.df['decision'].isna()) | (self.df['decision'] == '')).sum())
             missing_desc = 0
             if DESCRIPTION_FIELD in self.df.columns:
                 missing_desc = int(self.df[DESCRIPTION_FIELD].isna().sum())
-            return dict(total=total, apply=apply_ct, reject=reject_ct, delete=delete_ct,
-                        pending=pending_ct, missing_description=missing_desc)
+            # Maintain backward compatibility: provide aggregate apply count (applied + to_apply)
+            apply_ct = applied_ct + to_apply_ct
+            return dict(total=total, apply=apply_ct, applied=applied_ct, to_apply=to_apply_ct,
+                        reject=reject_ct, delete=delete_ct, pending=pending_ct,
+                        missing_description=missing_desc)
 
 def create_session_backup(data_file: Path):
     """Create (and replace) a session startup backup of the current jobs.csv.
@@ -217,7 +233,9 @@ def serialize_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def create_app(store: JobsStore) -> Flask:
-    app = Flask(__name__, template_folder='templates')
+    # Use the ui/ folder itself as both template and static directory since index.html & theme.css live here now
+    ui_dir = Path(__file__).parent
+    app = Flask(__name__, template_folder=str(ui_dir), static_folder=str(ui_dir))
 
     @app.get('/')
     def index():

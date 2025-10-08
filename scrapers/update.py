@@ -1,11 +1,16 @@
-from util import linkedin_scraper, jobnet_scraper, jobindex_scraper
+from util import linkedin_scraper, jobnet_scraper, jobindex_scraper, auto_reject_jobs
 import pandas as pd
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="The behavior of DataFrame concatenation with empty or all-NA entries is deprecated",
+    category=FutureWarning,
+    module="pandas.core.reshape.concat"
+)
 import os, json
 from pathlib import Path
 from datetime import datetime, timezone
-from job_config import (
-    title, city, postal, street, num_jobs, km_dist
-)
+from config_loader import get_scrape_params, get_titles_list
 
 STATE_FILE = Path('.last_scrape.json')  # maintained by daily_update.py
 cutoff_dt = None
@@ -38,14 +43,66 @@ if 'url' in existing_df.columns:
                 existing_linkedin_ids.add(u.rstrip('/').split('/')[-1])
             except Exception:
                 pass
-print(f"[update] Starting scrape set for title='{title}' city='{city}' target_per_source={num_jobs} existing_unique_keys={len(existing_keys)} cutoff={(cutoff_dt.isoformat() if cutoff_dt else 'none')}")
+title, city, postal, street, num_jobs, km_dist = get_scrape_params()
+titles_list = get_titles_list()
+print(f"[update] Starting scrape for titles={titles_list} city='{city}' target_per_title={num_jobs} existing_unique_keys={len(existing_keys)} cutoff={(cutoff_dt.isoformat() if cutoff_dt else 'none')}")
 
-linkedin_df = linkedin_scraper(title, city, num_jobs, existing_ids=existing_linkedin_ids)
-jobnet_df = jobnet_scraper(title, city, postal, km_dist, num_jobs, existing_keys=existing_keys, cutoff_dt=cutoff_dt)
-jobindex_df = jobindex_scraper(title, city, postal, street, km_dist, num_jobs, existing_keys=existing_keys, cutoff_dt=cutoff_dt)
-print(f"[update] Source counts: linkedin={len(linkedin_df)} jobnet={len(jobnet_df)} jobindex={len(jobindex_df)}")
+all_linkedin = []
+all_jobnet = []
+all_jobindex = []
+
+for t in titles_list:
+    print(f"[update] -- Scraping title variant: {t}")
+    # Scrape per title; each scraper returns rows; we deduplicate within its own results later
+    ldf = linkedin_scraper(t, city, num_jobs, existing_ids=existing_linkedin_ids)
+    all_linkedin.append(ldf)
+    jndf = jobnet_scraper(t, city, postal, km_dist, num_jobs, existing_keys=existing_keys, cutoff_dt=cutoff_dt)
+    all_jobnet.append(jndf)
+    jxdf = jobindex_scraper(t, city, postal, street, km_dist, num_jobs, existing_keys=existing_keys, cutoff_dt=cutoff_dt)
+    all_jobindex.append(jxdf)
+
+# Concatenate per-source and drop duplicate (company,title) within each source to avoid repeats across titles
+def _dedup_source(frames, source_name):
+    frames = [f for f in frames if f is not None and not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    cat = pd.concat(frames, ignore_index=True)
+    before = len(cat)
+    if 'company' in cat.columns and 'title' in cat.columns:
+        cat = cat.drop_duplicates(subset=['company','title'])
+    after = len(cat)
+    if after < before:
+        print(f"[update] {source_name}: removed {before-after} intra-source duplicate rows (company,title) across multiple titles")
+    return cat
+
+linkedin_df = _dedup_source(all_linkedin, 'LinkedIn')
+jobnet_df = _dedup_source(all_jobnet, 'Jobnet')
+jobindex_df = _dedup_source(all_jobindex, 'Jobindex')
+
+print(f"[update] Source counts (post multi-title merge): linkedin={len(linkedin_df)} jobnet={len(jobnet_df)} jobindex={len(jobindex_df)}")
 
 df = pd.concat([linkedin_df, jobnet_df, jobindex_df], ignore_index=True)
+# Ensure required decision-related columns are present before auto-reject
+for c in ["decision","decision_reason"]:
+    if c not in df.columns:
+        df[c] = None
+
+# Apply auto-reject only to rows that currently have no decision (so we don't overwrite)
+try:
+    pre_reject_pending = df['decision'].isna() | (df['decision'] == '')
+    # Work on a view of pending subset to avoid touching pre-labeled rows
+    pending_idx = df[pre_reject_pending].index
+    if len(pending_idx) > 0:
+        sub = df.loc[pending_idx].copy()
+        sub = auto_reject_jobs(sub)
+        # Only propagate rows where decision was actually set to 'reject'
+        changed = sub[sub['decision'] == 'reject']
+        if not changed.empty:
+            df.loc[changed.index, 'decision'] = changed['decision']
+            df.loc[changed.index, 'decision_reason'] = changed['decision_reason']
+            print(f"[update] Auto-reject applied to {len(changed)} newly scraped rows")
+except Exception as e:
+    print(f"[update] Warning: auto-reject step failed ({e})")
 for c in ["applied_date","reply","cover_letter","decision","decision_reason","last_updated","cv"]:
     if c not in df.columns:
         df[c] = None

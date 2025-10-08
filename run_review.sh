@@ -22,6 +22,9 @@ VENV_DIR="${PROJECT_ROOT}/.venv"
 PY="python3"
 REQ_FILE="${PROJECT_ROOT}/requirements.txt"
 
+# Ensure we are running from the project root (important for scripts referencing relative assets)
+cd "${SCRIPT_DIR}"
+
 # Parse args (simple)
 ARGS=()
 for a in "$@"; do
@@ -106,9 +109,13 @@ fi
 
 # Perform daily scrape (runs update.py at most once per day)
 if [ "$CMD" = "start" ]; then
-  echo "[daily] Checking if daily scrape needed..." >&2
-  if ! "$PY" "${SCRIPT_DIR}/daily_update.py"; then
-    echo "[daily] Warning: daily scrape script exited with an error (continuing anyway)." >&2
+  if [ -f "${SCRIPT_DIR}/daily_update.py" ]; then
+    echo "[daily] Checking if daily scrape needed..." >&2
+    if ! "$PY" "${SCRIPT_DIR}/daily_update.py"; then
+      echo "[daily] Warning: daily scrape script exited with an error (continuing anyway)." >&2
+    fi
+  else
+    echo "[daily] Skipping daily scrape (daily_update.py not found)." >&2
   fi
 fi
 
@@ -127,7 +134,7 @@ fi
 
 # No idle timeout env exported (feature removed)
 
-"${PY}" "${SCRIPT_DIR}/review_app.py" --host "${HOST}" --port "${PORT}" --no-open &
+"${PY}" "${SCRIPT_DIR}/ui/review_app.py" --host "${HOST}" --port "${PORT}" --no-open &
 APP_PID=$!
 echo ${APP_PID} > "$PID_FILE"
 echo ${PORT} > "$PORT_FILE"

@@ -3,6 +3,9 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Set, Tuple
+from config_loader import get_title_keywords
+title_keywords = get_title_keywords()
+
 
 # Progress bar support (tqdm) with graceful fallback if not installed yet.
 try:
@@ -140,10 +143,6 @@ def linkedin_scraper(title, city, num_jobs, existing_ids: Optional[Set[str]] = N
     else:
         # Ensure column exists even if empty
         df = pd.DataFrame(columns=['job_board'])
-    print(f"[scrape] LinkedIn: built dataframe with {len(df)} rows.")
-    return df
-        
-    df = pd.DataFrame(job_list)
     print(f"[scrape] LinkedIn: built dataframe with {len(df)} rows.")
     return df
         
@@ -298,3 +297,11 @@ def jobindex_scraper(title, city, postal, street, km_dist, num_jobs, existing_ke
     print(f"[scrape] Jobindex: dataframe rows={len(df)} (requested {num_jobs})")
     return df
 
+
+def auto_reject_jobs(df):
+    
+    # Reject based on title keywords
+    for keyword in title_keywords:
+        df.loc[df['title'].str.contains(keyword, case=False, na=False), 'decision'] = 'reject'
+        df.loc[df['title'].str.contains(keyword, case=False, na=False), 'decision_reason'] = f"Title contains '{keyword}'"
+    return df

@@ -93,7 +93,11 @@ async function loadFilters(){
 async function loadStats(){
   const r = await fetch('/api/stats');
   const st = await r.json();
-  lastStatsText = `Rows ${st.total} | apply ${st.apply} reject ${st.reject} delete ${st.delete} pending ${st.pending}`;
+  // Display distinct buckets: applied, to_apply, reject, delete, pending
+  // Use spaced separators for readability
+  const applied = (st.applied !== undefined) ? st.applied : (st.apply || 0); // fallback
+  const toApply = (st.to_apply !== undefined) ? st.to_apply : 0;
+  lastStatsText = `Rows ${st.total}  |  applied ${applied}  -  to_apply ${toApply}  -  reject ${st.reject}  -  delete ${st.delete}  -  pending ${st.pending}`;
   refreshStatusBar();
 }
 async function fetchJob(id){
