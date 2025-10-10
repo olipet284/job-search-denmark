@@ -12,7 +12,8 @@ from flask import Flask, jsonify, request, render_template
 
 # Root project directory (one level up from this ui/ folder)
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_FILE = ROOT_DIR / "jobs.csv"
+# Allow overriding CSV path via environment to avoid CWD surprises
+DATA_FILE = Path(os.environ.get("JOBS_CSV", str(ROOT_DIR / "jobs.csv")))
 BACKUP_DIR = ROOT_DIR / "_backups"
 BACKUP_DIR.mkdir(exist_ok=True)
 

@@ -25,6 +25,10 @@ REQ_FILE="${PROJECT_ROOT}/requirements.txt"
 # Ensure we are running from the project root (important for scripts referencing relative assets)
 cd "${SCRIPT_DIR}"
 
+# Export absolute data/state paths so subprocesses do not depend on CWD
+export JOBS_CSV="${PROJECT_ROOT}/jobs.csv"
+export JOBS_STATE="${PROJECT_ROOT}/.last_scrape.json"
+
 # Parse args (simple)
 ARGS=()
 for a in "$@"; do

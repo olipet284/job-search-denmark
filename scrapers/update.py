@@ -12,7 +12,13 @@ from pathlib import Path
 from datetime import datetime, timezone
 from config_loader import get_scrape_params, get_titles_list
 
-STATE_FILE = Path('.last_scrape.json')  # maintained by daily_update.py
+# Resolve repository root (one level up from scrapers/)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+# Allow overriding the jobs CSV via environment variable to avoid CWD issues
+JOBS_CSV_PATH = Path(os.environ.get("JOBS_CSV", str(ROOT_DIR / "jobs.csv")))
+# State file maintained by daily_update.py; keep it anchored to root as well
+STATE_FILE = Path(os.environ.get("JOBS_STATE", str(ROOT_DIR / ".last_scrape.json")))
+
 cutoff_dt = None
 if STATE_FILE.exists():
     try:
@@ -25,11 +31,11 @@ if STATE_FILE.exists():
 
 # Load existing file early for early-termination key set
 existing_df = None
-if os.path.exists("jobs.csv"):
+if JOBS_CSV_PATH.exists():
     try:
-        existing_df = pd.read_csv("jobs.csv")
+        existing_df = pd.read_csv(JOBS_CSV_PATH)
     except Exception as e:
-        print(f"[update] Warning: failed reading existing jobs.csv ({e}); proceeding with only new scrape data")
+        print(f"[update] Warning: failed reading existing jobs.csv at {JOBS_CSV_PATH} ({e}); proceeding with only new scrape data")
 if existing_df is None:
     existing_df = pd.DataFrame(columns=["company","title"])  # minimal schema if first run
 
@@ -51,6 +57,7 @@ if 'url' in existing_df.columns:
                 pass
 title, city, postal, street, num_jobs, km_dist = get_scrape_params()
 titles_list = get_titles_list()
+print(f"[update] Using jobs.csv at: {JOBS_CSV_PATH}")
 print(f"[update] Starting scrape for titles={titles_list} city='{city}' target_per_title={num_jobs} existing_unique_keys={len(existing_keys)} cutoff={(cutoff_dt.isoformat() if cutoff_dt else 'none')}")
 
 all_linkedin = []
@@ -117,10 +124,10 @@ for c in ["applied_date","reply","cover_letter","decision","decision_reason","la
         df[c] = None
 df  # no-op
 
-if not os.path.exists("jobs.csv"):
+if not JOBS_CSV_PATH.exists():
     # create initial file with full schema
     schema_df = df.copy().iloc[0:0]
-    schema_df.to_csv("jobs.csv", index=False)
+    schema_df.to_csv(JOBS_CSV_PATH, index=False)
     existing_df = schema_df
     existing_keys = set()
 
@@ -196,5 +203,5 @@ if 'time_posted' in df.columns:
     except Exception as e:
         print(f"[update] Warning: failed normalizing time_posted column ({e})")
 print(f"[update] Writing jobs.csv with {len(df)} total rows (deduped).")
-df.to_csv("jobs.csv", index=False)
+df.to_csv(JOBS_CSV_PATH, index=False)
 print("[update] Done.")

@@ -6,12 +6,14 @@ Prints a message to stdout indicating whether a scrape was performed or skipped.
 """
 from __future__ import annotations
 import json
+import os
 from pathlib import Path
 from datetime import datetime, timezone
 import subprocess
 import sys
 
-STATE_FILE = Path(__file__).parent / '.last_scrape.json'
+ROOT_DIR = Path(__file__).resolve().parent.parent
+STATE_FILE = Path(os.environ.get('JOBS_STATE', str(ROOT_DIR / '.last_scrape.json')))
 UPDATE_SCRIPT = Path(__file__).parent / 'update.py'
 
 def read_last_date():
@@ -38,7 +40,8 @@ def main():
     print(f"[daily_update] Last scrape: {last or 'never'} -> running update.py now (date {today})...")
     # Run the update script in a subprocess so its stdout is streamed
     try:
-        proc = subprocess.run([sys.executable, str(UPDATE_SCRIPT)], check=True)
+        # Ensure update.py inherits same env vars (JOBS_CSV/JOBS_STATE) and runs from scrapers dir
+        proc = subprocess.run([sys.executable, str(UPDATE_SCRIPT)], check=True, cwd=str(UPDATE_SCRIPT.parent))
     except subprocess.CalledProcessError as e:
         print(f"[daily_update] update.py failed with return code {e.returncode}", file=sys.stderr)
         return e.returncode
