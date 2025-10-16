@@ -26,6 +26,7 @@ for index, row in df.iterrows():
         continue
 
     message += f"Creating Notion page for {row['company']} - {row['title']} (applied {row['applied_date']})\n"
+    
     notion.pages.create(
         parent={"database_id": notion_database_id},
         properties={
@@ -51,7 +52,7 @@ for index, row in df.iterrows():
             }
         }
     )
-    row['notion'] = True
+    df.at[index, 'notion'] = True
 df.to_csv('jobs.csv', index=False)
 
 if message == "":
