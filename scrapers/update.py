@@ -69,7 +69,7 @@ for t in titles_list:
     # Scrape per title; each scraper returns rows; we deduplicate within its own results later
     ldf = linkedin_scraper(t, city, num_jobs, existing_ids=existing_linkedin_ids)
     all_linkedin.append(ldf)
-    jndf = jobnet_scraper(t, city, postal, km_dist, num_jobs, existing_keys=existing_keys, cutoff_dt=cutoff_dt)
+    jndf = jobnet_scraper(t, postal, km_dist, num_jobs, existing_keys=existing_keys, cutoff_dt=cutoff_dt)
     all_jobnet.append(jndf)
     jxdf = jobindex_scraper(t, city, postal, street, km_dist, num_jobs, existing_keys=existing_keys, cutoff_dt=cutoff_dt)
     all_jobindex.append(jxdf)

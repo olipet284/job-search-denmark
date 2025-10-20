@@ -144,41 +144,42 @@ def linkedin_scraper(title, city, num_jobs, existing_ids: Optional[Set[str]] = N
     return df
         
 
-def jobnet_scraper(title, city, postal, km_dist, num_jobs, existing_keys: Optional[Set[Tuple[str,str]]] = None, cutoff_dt: Optional[datetime] = None):
-    payload = {"model":{"Offset":"0","Count":num_jobs,"SearchString":title,"SortValue":"CreationDate","Ids":[],"EarliestPublicationDate":None,"HotJob":None,"Abroad":None,"NearBy":"","OnlyGeoPoints":False,"WorkPlaceNotStatic":None,"WorkHourMin":None,"WorkHourMax":None,"Facets":{"Region":None,"Country":None,"Municipality":None,"PostalCode":None,"OccupationAreas":None,"OccupationGroups":None,"Occupations":None,"EmploymentType":None,"WorkHours":None,"WorkHourPartTime":None,"JobAnnouncementType":None,"WorkPlaceNotStatic":None},"LocatedIn":None,"LocationZip":postal + " " + city,"Location":None,"SearchInGeoDistance":km_dist,"SimilarOccupations":None,"SearchWithSimilarOccupations":False},"url":f"/CV/FindWork?SearchString={'%2520'.join(title.split(' '))}&Offset=0&SortValue=CreationDate&SearchInGeoDistance={km_dist}&LocationZip={'%2520'.join((postal + ' ' + city).split(' '))}"}
-    response = requests.post("https://job.jobnet.dk/CV/FindWork/Search", json=payload)
-    assert response.status_code == 200, "Failed to retrieve job listings"
+def jobnet_scraper(title, postal, km_dist, num_jobs, existing_keys: Optional[Set[Tuple[str,str]]] = None, cutoff_dt: Optional[datetime] = None):
+    list_url = f"https://jobnet.dk/bff/FindJob/Search?resultsPerPage={num_jobs}&pageNumber=1&orderType=PublicationDate&kmRadius={km_dist}&searchString={title.replace(' ', '+')}&postalCode={postal}"
+    response = requests.get(list_url)   
+    if response.status_code != 200:
+        print(f"[scrape] Jobnet: failed to fetch job listings (status code: {response.status_code})")
+        return pd.DataFrame(columns=['job_board'])
     response_dict = response.json()
-    print(f"[scrape] Jobnet: fetching up to {num_jobs} jobs for '{title}' near {postal} {city} (r={km_dist}km)")
+    print(f"[scrape] Jobnet: fetching up to {num_jobs} jobs for '{title}' near {postal} (r={km_dist}km)")
     if existing_keys is None:
         existing_keys = set()
     job_list = []
-    postings = response_dict.get("JobPositionPostings", [])
+    postings = response_dict.get("jobAds", [])
     early_reason = None
     for job_dict in tqdm(postings, desc="Jobnet jobs", unit="job"):
-        job_id = job_dict["ID"]
-        job_url = job_dict["Url"]
+        job_id = job_dict["jobAdId"]
+        job_url = job_dict["jobAdUrl"]
+        if len(job_url) == 0:
+            job_url = f"https://jobnet.dk/find-job/{job_id}"
         job_post = {}
         
-        job_post["title"] = job_dict["Title"]
-        job_post["company"] = job_dict["HiringOrgName"]
-        job_post["location"] = job_dict["WorkPlaceCity"]
+        job_post["title"] = job_dict["title"]
+        job_post["company"] = job_dict["hiringOrgName"]
+        job_post["location"] = job_dict["postalDistrictName"]
         
-        job_post["time_posted"] = job_dict["PostingCreated"]
+        job_post["time_posted"] = job_dict["publicationDate"]
         job_post["url"] = job_url
-        job_post["employment_type"] = job_dict["EmploymentType"]
-        job_post["full_or_part_time"] = job_dict["WorkHours"]
+        job_post["employment_type"] = None
+        if job_dict["workHourPartTime"]:
+            job_post["full_or_part_time"] = "Part-time"
+        else:
+            job_post["full_or_part_time"] = "Full-time"
 
-        job_post["description"] = None 
+        job_soup = BeautifulSoup(job_dict["description"], 'html.parser')
+        desc_lines = [line.strip() for line in job_soup.stripped_strings if line.strip()]
+        job_post["description"] = "\n".join(desc_lines)
         
-        if not job_dict["IsExternal"]:
-            job_response = requests.get(f"https://job.jobnet.dk/CV/FindWork/JobDetailJson?id={job_id}&previewtoken=")
-            if job_response.status_code == 200:
-                data = job_response.json()
-                formatted_html = data.get("FormattedPurpose") or ""
-                job_soup = BeautifulSoup(formatted_html, 'html.parser')
-                desc_lines = [line.strip() for line in job_soup.stripped_strings if line.strip()]
-                job_post["description"] = "\n".join(desc_lines) or data.get("Description")
         key = (job_post.get("company"), job_post.get("title"))
         # Early termination checks
         # Parse posted time if possible (ISO expected)
@@ -208,7 +209,6 @@ def jobnet_scraper(title, city, postal, km_dist, num_jobs, existing_keys: Option
     return df
 
 
-# TODO: Add full time/part time info
 def jobindex_scraper(title, city, postal, street, km_dist, num_jobs, existing_keys: Optional[Set[Tuple[str,str]]] = None, cutoff_dt: Optional[datetime] = None):
     page = 1
     job_list = []
