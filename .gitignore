@@ -7,3 +7,4 @@ _backups/
 *.json
 TODO.md
 config.ini
+*.ipynb
