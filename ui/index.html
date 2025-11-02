@@ -16,6 +16,7 @@
   <button id="prevBtn" class="secondary">Prev</button>
   <button id="nextBtn">Next</button>
   <button id="rejectNextBtn" class="danger" style="margin-left:.25rem; display:none;" title="Reject current row and move to next (only in pending filter)">Reject &raquo;</button>
+  <button id="applyNextBtn" class="accept" style="margin-left:.25rem; display:none;" title="Add current row to to_apply and move to next (only in pending filter)">Apply &raquo;</button>
   <button id="saveBtn" class="secondary">Save CSV</button>
   <button id="deleteBtn" class="danger" style="margin-left:.25rem;">Delete</button>
   <button id="listBtn" class="secondary" style="margin-left:.5rem;">List</button>
@@ -175,6 +176,7 @@ $('nextBtn').addEventListener('click', ()=> navigate('next'));
 $('prevBtn').addEventListener('click', ()=> navigate('prev'));
 $('saveBtn').addEventListener('click', ()=> saveUpdates({save:true}));
 document.getElementById('rejectNextBtn').addEventListener('click', quickRejectNext);
+document.getElementById('applyNextBtn').addEventListener('click', quickApplyNext);
 $('deleteBtn').addEventListener('click', async ()=>{
   if(currentId == null){ return; }
   const confirmMsg = `Delete row ${currentId}? This cannot be undone (unless you restore from a backup CSV).`;
@@ -434,6 +436,46 @@ async function quickRejectNext(){
   // Stats will refresh inside saveUpdates
 }
 
+function updateQuickApplyVisibility(){
+  const btn = document.getElementById('applyNextBtn');
+  if(!btn) return;
+  btn.style.display = (currentFilter === 'pending') ? 'inline-block' : 'none';
+}
+
+async function quickApplyNext(){
+  if(currentId == null) return;
+  if(currentFilter !== 'pending') return; // safety guard
+  // Pre-fetch next id BEFORE changing decision (current row will leave pending after apply)
+  let nextId = null;
+  try {
+    const r = await fetch(`/api/nav?current=${currentId}&dir=next&filter=${encodeURIComponent(currentFilter)}`);
+    if(r.ok){
+      const d = await r.json();
+      nextId = d.id;
+    }
+  } catch(_){ }
+  // Set decision UI locally
+  $('decisionSelect').value = 'apply';
+  $('decisionReason').value = '';
+  await saveUpdates();
+  // Move to next pending row if exists
+  if(nextId != null){
+    fetchJob(nextId);
+  } else {
+    // No more pending rows
+    currentId = null;
+    $('currentId').textContent='(no rows)';
+    $('description').value='';
+    $('meta').innerHTML='';
+    updateQuickApplyVisibility();
+    updateAppliedDateButtonVisibility();
+    updateDocsVisibility();
+    refreshStatusBar();
+    const sb = $('statusBar'); if(sb) sb.textContent += ' | All pending rows processed.';
+  }
+  // Stats will refresh inside saveUpdates
+}
+
 // Hook into navigation/render to adjust visibility
 const _origRenderJob = renderJob;
 renderJob = function(data){
@@ -441,6 +483,7 @@ renderJob = function(data){
   updateAppliedDateButtonVisibility();
   updateDocsVisibility();
   updateQuickRejectVisibility();
+  updateQuickApplyVisibility();
 };
 
 // Also adjust after filter change

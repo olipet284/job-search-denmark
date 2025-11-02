@@ -85,6 +85,8 @@ button.secondary { background: var(--bg-alt); }
 button.secondary:hover { background: var(--bg-alt2); }
 button.danger { background: var(--danger); border:none; color:#fff; }
 button.danger:hover { filter:brightness(1.05); }
+button.accept { background: var(--ok); border:none; color:#fff; }
+button.accept:hover { filter:brightness(1.05); }
 
 fieldset { border:1px solid var(--panel-border); padding: .85rem 1rem 1rem; border-radius: var(--radius); background: var(--panel); }
 legend { padding:0 .5rem; font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; color: var(--text-dim); }
