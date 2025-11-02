@@ -96,6 +96,7 @@ def linkedin_scraper(title, city, num_jobs, existing_ids: Optional[Set[str]] = N
                 job_post["description"] = desc_div.get_text("\n", strip=True)
             except:
                 job_post["description"] = None
+            job_post["deadline"] = None  # LinkedIn does not provide application deadlines, could be scraped from description if needed
             try:
                 date_str = job_soup.find("span", {"class": "posted-time-ago__text topcard__flavor--metadata"}).text.strip()
                 if any(k in date_str for k in ("week","month","year")):
@@ -168,6 +169,11 @@ def jobnet_scraper(title, postal, km_dist, num_jobs, existing_keys: Optional[Set
         job_post["company"] = job_dict["hiringOrgName"]
         job_post["location"] = job_dict["postalDistrictName"]
         
+        deadline = job_dict.get("applicationDeadline")
+        if deadline:
+            job_post["deadline"] = deadline[:10]
+        else:
+            job_post["deadline"] = None
         job_post["time_posted"] = job_dict["publicationDate"]
         job_post["url"] = job_url
         job_post["employment_type"] = None
@@ -213,7 +219,7 @@ def jobindex_scraper(title, city, postal, street, km_dist, num_jobs, existing_ke
     page = 1
     job_list = []
     print(f"[scrape] Jobindex: collecting up to {num_jobs} jobs for '{title}' around {postal} {city} (r={km_dist}km)")
-    from math import inf
+
     if existing_keys is None:
         existing_keys = set()
     early_reason = None
@@ -242,6 +248,11 @@ def jobindex_scraper(title, city, postal, street, km_dist, num_jobs, existing_ke
                 except Exception:
                     job_post["location"] = None
                 job_post["time_posted"] = job_dict.get("firstdate")
+                deadline = job_dict.get("apply_deadline")
+                if deadline:
+                    job_post["deadline"] = deadline[:10]
+                else:
+                    job_post["deadline"] = None
                 job_post["url"] = job_url
                 job_post["description"] = None
 

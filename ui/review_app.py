@@ -27,7 +27,7 @@ REQUIRED_COLUMNS_DEFAULTS = [
 ]
 
 EDITABLE_TEXT_FIELDS = [
-    "company","title","url","location","time_posted","num_applicants",
+    "company","title","url","location","time_posted","deadline","num_applicants",
     "seniority_level","job_function","industries","employment_type","full_or_part_time","applied_date",
 ]
 
